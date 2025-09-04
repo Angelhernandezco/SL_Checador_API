@@ -8,6 +8,5 @@ class ExitRecord(Base):
     Exit_Record_Id = Column(Integer, primary_key=True, autoincrement=True)
     Employee_Id = Column(Integer, nullable=False)
     Company = Column(String(100), nullable=False)
-    Name = Column(String(100), nullable=False)
     DateHour = Column(DateTime, nullable=False)
     Exit_Type = Column(String(3), nullable=False)

@@ -1,11 +1,9 @@
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel
+from schemas.employee import EmployeeBase
 
 
-# -------------------------------
-# Modelo base de permiso
-# -------------------------------
 class PermissionBase(BaseModel):
     Employee_Id: int
     Company: str
@@ -13,13 +11,11 @@ class PermissionBase(BaseModel):
     Is_Active: bool
 
 
-class PermissionWithEmployee(BaseModel):
-    Employee_Id: int
-    Name: str
-    Photo: Optional[str]
+class PermissionWithEmployee(EmployeeBase):
     Company: str
     Valid_Until: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 

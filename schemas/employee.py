@@ -6,5 +6,6 @@ class EmployeeBase(BaseModel):
     Name: str
     Photo: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }

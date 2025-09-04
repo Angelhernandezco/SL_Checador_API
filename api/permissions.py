@@ -8,7 +8,7 @@ from models.permission import Permission
 from schemas.permission import PermissionWithEmployee
 from utils.db import get_db
 from utils.payroll_db import get_db as get_db_payroll
-
+from utils.photo_utils import photo_to_base64
 
 router = APIRouter()
 
@@ -31,8 +31,8 @@ def obtener_permisos(db: Session = Depends(get_db), payroll_db: Session = Depend
         results.append(
             PermissionWithEmployee(
                 Employee_Id=permiso.Employee_Id,
-                Name=empleado.nombre if empleado else "Desconocido",
-                Photo=empleado.foto if empleado else None,
+                Name=empleado.NombreCompleto if empleado else "Desconocido",
+                Photo=photo_to_base64(empleado.Foto) if empleado else None,
                 Company=permiso.Company,
                 Valid_Until=permiso.Valid_Until,
             )
@@ -43,7 +43,7 @@ def obtener_permisos(db: Session = Depends(get_db), payroll_db: Session = Depend
 # -------------------------------
 # Asignar permisos diarios a varios empleados
 # -------------------------------
-@router.post("/", response_model=List[PermissionWithEmployee])
+@router.post("/add", response_model=List[PermissionWithEmployee])
 def asignar_permisos(
     ids_empleados: List[int],
     db: Session = Depends(get_db),
@@ -74,8 +74,8 @@ def asignar_permisos(
         permisos_creados.append(
             PermissionWithEmployee(
                 Employee_Id=empleado.ID_Empleado,
-                Name=empleado.nombre,
-                Photo=empleado.foto,
+                Name=empleado.NombreCompleto,
+                Photo=photo_to_base64(empleado.Foto) if empleado else None,
                 Company=permiso.Company,
                 Valid_Until=permiso.Valid_Until,
             )
@@ -89,7 +89,7 @@ def asignar_permisos(
 # -------------------------------
 # Quitar permisos del día
 # -------------------------------
-@router.post("/")
+@router.post("/remove")
 def quitar_permisos(ids_empleados: List[int], db: Session = Depends(get_db)):
     hoy = datetime.now()
 
@@ -117,14 +117,33 @@ def quitar_permisos(ids_empleados: List[int], db: Session = Depends(get_db)):
 # Asignar permiso a un solo empleado y devolver datos del usuario
 # -------------------------------
 @router.post("/{id_empleado}", response_model=PermissionWithEmployee)
-def asignar_permiso(id_empleado: int, db: Session = Depends(get_db), payroll_db: Session = Depends(get_db_payroll)):
-    empleado = db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
+def asignar_permiso(
+    id_empleado: int,
+    db: Session = Depends(get_db),
+    payroll_db: Session = Depends(get_db_payroll),
+):
+    # Buscar empleado en la nómina
+    empleado = payroll_db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
     if not empleado:
         raise HTTPException(status_code=404, detail="Empleado no encontrado en nómina")
 
     ahora = datetime.now()
     fin_dia = datetime.combine(ahora.date(), datetime.max.time())
 
+    # Verificar si ya tiene permiso activo hoy
+    permiso_existente = (
+        db.query(Permission)
+        .filter(
+            Permission.Employee_Id == id_empleado,
+            Permission.Is_Active == True,
+            Permission.Valid_Until > ahora  # cualquier permiso que no haya expirado antes de hoy
+        )
+        .first()
+    )
+    if permiso_existente:
+        raise HTTPException(status_code=400, detail="El empleado ya tiene un permiso asignado")
+
+    # Crear nuevo permiso
     permiso = Permission(
         Employee_Id=id_empleado,
         Company="Empaque",
@@ -137,8 +156,8 @@ def asignar_permiso(id_empleado: int, db: Session = Depends(get_db), payroll_db:
 
     return PermissionWithEmployee(
         Employee_Id=empleado.ID_Empleado,
-        Name=empleado.nombre,
-        Photo=empleado.foto,
+        Name=empleado.NombreCompleto,
+        Photo=photo_to_base64(empleado.Foto),
         Company=permiso.Company,
         Valid_Until=permiso.Valid_Until
     )
