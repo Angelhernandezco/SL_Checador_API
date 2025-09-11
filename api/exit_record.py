@@ -138,7 +138,7 @@ router = APIRouter()
 # -------------------------------
 # Registrar salida de empleado
 # -------------------------------
-@router.get("/out/{id_empleado}")
+@router.post("/out/{id_empleado}")
 def registrar_salida(id_empleado: int, db: Session = Depends(get_db), payroll_db: Session = Depends(get_db_payroll)):
     ahora = datetime.now()
 

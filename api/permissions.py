@@ -41,6 +41,39 @@ def obtener_permisos(db: Session = Depends(get_db), payroll_db: Session = Depend
     return results
 
 # -------------------------------
+# Verificar si un empleado tiene permiso activo
+# -------------------------------
+@router.get("/{id_empleado}", response_model=PermissionWithEmployee)
+def verificar_permiso(
+    id_empleado: int,
+    db: Session = Depends(get_db),
+    payroll_db: Session = Depends(get_db_payroll),
+):
+    ahora = datetime.now()
+
+    permiso = (
+        db.query(Permission)
+        .filter(
+            Permission.Employee_Id == id_empleado,
+            Permission.Is_Active == True,
+            Permission.Valid_Until > ahora
+        )
+        .first()
+    )
+
+    if not permiso:
+        raise HTTPException(status_code=404, detail="El empleado no tiene permiso activo")
+
+    empleado = payroll_db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
+    return PermissionWithEmployee(
+        Employee_Id=permiso.Employee_Id,
+        Name=empleado.NombreCompleto if empleado else "Desconocido",
+        Photo=photo_to_base64(empleado.Foto) if empleado else None,
+        Company=permiso.Company,
+        Valid_Until=permiso.Valid_Until,
+    )
+
+# -------------------------------
 # Asignar permisos diarios a varios empleados
 # -------------------------------
 @router.post("/add", response_model=List[PermissionWithEmployee])
