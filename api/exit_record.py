@@ -1,126 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-
-from schemas.employee import EmployeeBase
-from utils.payroll_db import get_db as get_db_payroll
-from utils.db import get_db
-from models.exit_record import ExitRecord
-from models.permission import Permission
-from models.employee import Employee
-from openpyxl import Workbook
-from datetime import datetime, time
-import io
-
-from utils.photo_utils import photo_to_base64
-
-router = APIRouter()
-
-
-# -------------------------------
-# Registrar salida de empleado
-# -------------------------------
-@router.get("/out/{id_empleado}")
-def registrar_salida(id_empleado: int, db: Session = Depends(get_db), payroll_db: Session = Depends(get_db_payroll)):
-    ahora = datetime.now()
-
-    # Verificar que el empleado tenga un permiso válido y activo
-    permiso = (
-        db.query(Permission)
-        .filter(
-            Permission.Employee_Id == id_empleado,
-            Permission.Is_Active == True,
-            Permission.Valid_Until >= ahora,
-        )
-        .first()
-    )
-    if not permiso:
-        raise HTTPException(status_code=403, detail="Empleado no tiene permiso válido hoy")
-
-    inicio_dia = datetime.combine(ahora.date(), time.min)  # 00:00:00
-    fin_dia = datetime.combine(ahora.date(), time.max)  # 23:59:59.999999
-
-    # Validar que no tenga ya un OUT sin IN
-    last_record = (
-        db.query(ExitRecord)
-        .filter(
-            ExitRecord.Employee_Id == id_empleado,
-            ExitRecord.DateHour >= inicio_dia,
-            ExitRecord.DateHour <= fin_dia,
-        )
-        .order_by(ExitRecord.DateHour.desc())
-        .first()
-    )
-
-    if last_record and last_record.Exit_Type == "OUT":
-        raise HTTPException(status_code=400, detail="Empleado ya salió y no ha regresado hoy")
-
-    # Insertar salida
-    salida = ExitRecord(
-        Employee_Id=id_empleado,
-        Company="Empaque",
-        DateHour=ahora,
-        Exit_Type="OUT",
-    )
-    db.add(salida)
-    db.commit()
-    db.refresh(salida)
-
-    empleado = payroll_db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
-    return EmployeeBase(
-        Employee_Id=id_empleado,
-        Name=empleado.NombreCompleto if empleado else "Desconocido",
-        Photo=photo_to_base64(empleado.Foto) if empleado else None
-    )
-
-
-# -------------------------------
-# Registrar entrada
-# -------------------------------
-@router.post("/in/{id_empleado}")
-def registrar_entrada(id_empleado: int, db: Session = Depends(get_db), payroll_db: Session = Depends(get_db_payroll)):
-    ahora = datetime.now()
-    inicio_dia = datetime.combine(ahora.date(), time.min)  # 00:00:00
-    fin_dia = datetime.combine(ahora.date(), time.max)  # 23:59:59.999999
-
-    # Buscar el último registro del día
-    last_record = (
-        db.query(ExitRecord)
-        .filter(
-            ExitRecord.Employee_Id == id_empleado,
-            ExitRecord.DateHour >= inicio_dia,
-            ExitRecord.DateHour <= fin_dia,
-        )
-        .order_by(ExitRecord.DateHour.desc())
-        .first()
-    )
-
-    if not last_record or last_record.Exit_Type != "OUT":
-        raise HTTPException(status_code=400, detail="Empleado no tiene salida pendiente")
-
-    entrada = ExitRecord(
-        Employee_Id=id_empleado,
-        Company="Empaque",
-        DateHour=ahora,
-        Exit_Type="IN",
-    )
-    db.add(entrada)
-    db.commit()
-    db.refresh(entrada)
-
-    empleado = payroll_db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
-    return EmployeeBase(
-        Employee_Id=id_empleado,
-        Name=empleado.NombreCompleto if empleado else "Desconocido",
-        Photo=photo_to_base64(empleado.Foto) if empleado else None
-    )
-
-
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-
-from schemas.employee import EmployeeBase
 from utils.payroll_db import get_db as get_db_payroll
 from utils.db import get_db
 from models.exit_record import ExitRecord
@@ -139,7 +19,7 @@ router = APIRouter()
 # Registrar salida de empleado
 # -------------------------------
 @router.post("/out/{id_empleado}")
-def registrar_salida(id_empleado: int, db: Session = Depends(get_db), payroll_db: Session = Depends(get_db_payroll)):
+def registrar_salida(id_empleado: int, db: Session = Depends(get_db)):
     ahora = datetime.now()
 
     # Verificar que el empleado tenga un permiso válido y activo
@@ -171,7 +51,7 @@ def registrar_salida(id_empleado: int, db: Session = Depends(get_db), payroll_db
     )
 
     if last_record and last_record.Exit_Type == "OUT":
-        raise HTTPException(status_code=400, detail="Empleado ya salió y no ha regresado hoy")
+        raise HTTPException(status_code=400, detail="El empleado ya salió y no ha regresado")
 
     # Insertar salida
     salida = ExitRecord(
@@ -184,19 +64,14 @@ def registrar_salida(id_empleado: int, db: Session = Depends(get_db), payroll_db
     db.commit()
     db.refresh(salida)
 
-    empleado = payroll_db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
-    return EmployeeBase(
-        Employee_Id=id_empleado,
-        Name=empleado.NombreCompleto if empleado else "Desconocido",
-        Photo=photo_to_base64(empleado.Foto) if empleado else None
-    )
+    return True
 
 
 # -------------------------------
 # Registrar entrada
 # -------------------------------
 @router.post("/in/{id_empleado}")
-def registrar_entrada(id_empleado: int, db: Session = Depends(get_db), payroll_db: Session = Depends(get_db_payroll)):
+def registrar_entrada(id_empleado: int, db: Session = Depends(get_db)):
     ahora = datetime.now()
     inicio_dia = datetime.combine(ahora.date(), time.min)  # 00:00:00
     fin_dia = datetime.combine(ahora.date(), time.max)  # 23:59:59.999999
@@ -223,15 +98,24 @@ def registrar_entrada(id_empleado: int, db: Session = Depends(get_db), payroll_d
         Exit_Type="IN",
     )
     db.add(entrada)
+
+    # Buscar permiso activo y desactivarlo
+    permiso = (
+        db.query(Permission)
+        .filter(
+            Permission.Employee_Id == id_empleado,
+            Permission.Is_Active == True,
+            Permission.Valid_Until >= ahora
+        )
+        .first()
+    )
+    # if permiso:
+        # permiso.Is_Active = False
+
     db.commit()
     db.refresh(entrada)
 
-    empleado = payroll_db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
-    return EmployeeBase(
-        Employee_Id=id_empleado,
-        Name=empleado.NombreCompleto if empleado else "Desconocido",
-        Photo=photo_to_base64(empleado.Foto) if empleado else None
-    )
+    return True
 
 
 # -------------------------------

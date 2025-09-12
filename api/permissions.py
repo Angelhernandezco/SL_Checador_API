@@ -1,9 +1,10 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 from sqlalchemy.orm import Session
 from models.employee import Employee
+from models.exit_record import ExitRecord
 from models.permission import Permission
 from schemas.permission import PermissionWithEmployee
 from utils.db import get_db
@@ -16,7 +17,10 @@ router = APIRouter()
 # Obtener permisos del día
 # -------------------------------
 @router.get("/", response_model=List[PermissionWithEmployee])
-def obtener_permisos(db: Session = Depends(get_db), payroll_db: Session = Depends(get_db_payroll)):
+def obtener_permisos(
+        db: Session = Depends(get_db),
+        payroll_db: Session = Depends(get_db_payroll)
+):
     hoy = datetime.now()
 
     permisos = (
@@ -73,78 +77,6 @@ def verificar_permiso(
         Valid_Until=permiso.Valid_Until,
     )
 
-# -------------------------------
-# Asignar permisos diarios a varios empleados
-# -------------------------------
-@router.post("/add", response_model=List[PermissionWithEmployee])
-def asignar_permisos(
-    ids_empleados: List[int],
-    db: Session = Depends(get_db),
-    payroll_db: Session = Depends(get_db_payroll),
-):
-    ahora = datetime.now()
-    fin_dia = datetime.combine(ahora.date(), datetime.max.time())
-
-    permisos_creados: List[PermissionWithEmployee] = []
-
-    for emp_id in ids_empleados:
-        empleado = payroll_db.query(Employee).filter_by(ID_Empleado=emp_id).first()
-        if not empleado:
-            # Si un empleado no existe, simplemente lo ignoramos
-            # (o puedes lanzar error si quieres que sea estricto)
-            continue
-
-        permiso = Permission(
-            Employee_Id=emp_id,
-            Company="Empaque",
-            Valid_Until=fin_dia,
-            Is_Active=True,
-        )
-        db.add(permiso)
-        db.commit()
-        db.refresh(permiso)
-
-        permisos_creados.append(
-            PermissionWithEmployee(
-                Employee_Id=empleado.ID_Empleado,
-                Name=empleado.NombreCompleto,
-                Photo=photo_to_base64(empleado.Foto) if empleado else None,
-                Company=permiso.Company,
-                Valid_Until=permiso.Valid_Until,
-            )
-        )
-
-    if not permisos_creados:
-        raise HTTPException(status_code=404, detail="Ningún empleado válido encontrado")
-
-    return permisos_creados
-
-# -------------------------------
-# Quitar permisos del día
-# -------------------------------
-@router.post("/remove")
-def quitar_permisos(ids_empleados: List[int], db: Session = Depends(get_db)):
-    hoy = datetime.now()
-
-    permisos = (
-        db.query(Permission)
-        .filter(
-            Permission.Employee_Id.in_(ids_empleados),
-            Permission.Valid_Until >= hoy,
-            Permission.Is_Active == True,
-        )
-        .all()
-    )
-
-    if not permisos:
-        raise HTTPException(status_code=404, detail="Permisos no encontrados")
-
-    for permiso in permisos:
-        permiso.Is_Active = False
-
-    db.commit()
-    return {"message": "Permisos eliminados"}
-
 
 # -------------------------------
 # Asignar permiso a un solo empleado y devolver datos del usuario
@@ -158,7 +90,7 @@ def asignar_permiso(
     # Buscar empleado en la nómina
     empleado = payroll_db.query(Employee).filter_by(ID_Empleado=id_empleado).first()
     if not empleado:
-        raise HTTPException(status_code=404, detail="Empleado no encontrado en nómina")
+        raise HTTPException(status_code=404, detail="Empleado no encontrado en la base de datos de nómina")
 
     ahora = datetime.now()
     fin_dia = datetime.combine(ahora.date(), datetime.max.time())
@@ -194,3 +126,50 @@ def asignar_permiso(
         Company=permiso.Company,
         Valid_Until=permiso.Valid_Until
     )
+
+
+# -------------------------------
+# Quitar permiso de un solo empleado
+# -------------------------------
+@router.delete("/{id_empleado}")
+def quitar_permiso(
+    id_empleado: int,
+    db: Session = Depends(get_db),
+):
+    ahora = datetime.now()
+
+    inicio_dia = datetime.combine(ahora.date(), time.min)  # 00:00:00
+    fin_dia = datetime.combine(ahora.date(), time.max)  # 23:59:59.999999
+
+    # Validar que no tenga ya un OUT sin IN
+    last_record = (
+        db.query(ExitRecord)
+        .filter(
+            ExitRecord.Employee_Id == id_empleado,
+            ExitRecord.DateHour >= inicio_dia,
+            ExitRecord.DateHour <= fin_dia,
+        )
+        .order_by(ExitRecord.DateHour.desc())
+        .first()
+    )
+
+    if last_record and last_record.Exit_Type == "OUT":
+        raise HTTPException(status_code=400, detail="El empleado ya salió y no ha regresado")
+
+    permiso = (
+        db.query(Permission)
+        .filter(
+            Permission.Employee_Id == id_empleado,
+            Permission.Valid_Until >= ahora,
+            Permission.Is_Active == True,
+        )
+        .first()
+    )
+
+    if not permiso:
+        raise HTTPException(status_code=404, detail="Permiso no encontrado para este empleado")
+
+    permiso.Is_Active = False
+    db.commit()
+
+    return {"message": f"Permiso eliminado para el empleado {id_empleado}"}
