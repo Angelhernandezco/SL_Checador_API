@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from typing import List, Optional
 from schemas.employee import EmployeeBase
 from models.employee import Employee
 from utils.payroll_db import get_db as get_payroll_db

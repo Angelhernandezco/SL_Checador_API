@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from utils.payroll_db import get_db as get_db_payroll
 from utils.db import get_db
@@ -183,3 +184,61 @@ def reporte_ausentes(fecha_inicio: str, fecha_fin: str, db: Session = Depends(ge
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=reporte.xlsx"},
     )
+
+
+@router.get("/today")
+def exits_today(
+    db: Session = Depends(get_db),
+    payroll_db: Session = Depends(get_db_payroll)
+):
+    hoy = datetime.now().date()
+    inicio_dia = datetime.combine(hoy, time.min)
+    fin_dia = datetime.combine(hoy, time.max)
+
+    # Última salida OUT de cada empleado hoy
+    subquery = (
+        db.query(
+            ExitRecord.Employee_Id,
+            func.max(ExitRecord.DateHour).label("Last_Out")
+        )
+        .filter(
+            ExitRecord.Exit_Type == "OUT",
+            ExitRecord.DateHour >= inicio_dia,
+            ExitRecord.DateHour <= fin_dia
+        )
+        .group_by(ExitRecord.Employee_Id)
+        .subquery()
+    )
+
+    resultados = db.query(
+        subquery.c.Employee_Id,
+        subquery.c.Last_Out
+    ).all()
+
+    empleados_estado = []
+
+    for emp_id, last_out in resultados:
+        # Verificar si ya regresó
+        entrada = (
+            db.query(ExitRecord)
+            .filter(
+                ExitRecord.Employee_Id == emp_id,
+                ExitRecord.Exit_Type == "IN",
+                ExitRecord.DateHour >= last_out,
+                ExitRecord.DateHour <= fin_dia
+            )
+            .order_by(ExitRecord.DateHour)
+            .first()
+        )
+
+        empleado = payroll_db.query(Employee).filter_by(ID_Empleado=emp_id).first()
+
+        empleados_estado.append({
+            "Employee_Id": emp_id,
+            "Name": empleado.NombreCompleto if empleado else "Desconocido",
+            "Photo": photo_to_base64(empleado.Foto) if empleado else None,
+            "Last_Out": last_out,
+            "Status": "ya_regreso" if entrada else "ausente"
+        })
+
+    return empleados_estado
